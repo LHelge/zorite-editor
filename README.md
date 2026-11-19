@@ -10,7 +10,7 @@ It is built directly on GPUI's text primitives: an `EntityInputHandler` for
 keyboard and IME input, `shape_line` for per-line shaping, and a custom
 `Element` that lays out and paints the lines, caret, and selection. It depends
 on `gpui` and `unicode-segmentation`, plus one sibling crate,
-[`zorite-markdown`](../zorite-markdown/README.md) with default features off,
+[`zorite-markdown`](https://github.com/packetThrower/zorite-markdown) with default features off,
 for its dependency-free `syntax` module. That module decides what counts as a
 link, an alert, or a table style; sharing it keeps the editor and the reading
 view in agreement.
@@ -30,7 +30,7 @@ The complete API reference, including the seat/commit protocols, is in
   (`cmd`/`ctrl`-`b`/`i`/`u`, `-shift-x`, `-e`, `-shift-h`).
 - **Soft-wrap** with content-driven height. A line containing right-to-left
   text is instead broken in *logical* order and laid out row by row via
-  [`gpui-bidi`](../gpui-bidi/README.md) — gpui's own wrapping slices the
+  [`gpui-bidi`](https://github.com/packetThrower/gpui-bidi) — gpui's own wrapping slices the
   already-reordered glyph run, which reads bottom-to-top and splits words.
 - **Bidirectional text:** caret, selection, click hit-testing and visual arrow
   movement work in Persian/Hebrew prose, table cells and mixed lines, including
@@ -228,7 +228,7 @@ The exact fields, host obligations, and the seat/commit protocol behind
 ## Demo
 
 A standalone window wired to the real OS spell checker (via the
-[`os-spellcheck`](../os-spellcheck) crate), live Markdown styling, a PDF-style
+[`os-spellcheck`](https://github.com/packetThrower/os-spellcheck) crate), live Markdown styling, a PDF-style
 file chip, and styled tables:
 
 ```sh

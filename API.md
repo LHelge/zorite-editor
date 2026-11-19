@@ -495,7 +495,7 @@ pub fn set_diagnostics(&mut self, diagnostics: Vec<Diagnostic>, cx: &mut Context
 ```
 
 Replace the set of flagged spans, each painted with a red wavy underline. The
-host computes them (e.g. with [`os-spellcheck`](../os-spellcheck)) and
+host computes them (e.g. with [`os-spellcheck`](https://github.com/packetThrower/os-spellcheck)) and
 refreshes on its own schedule — typically per edit; detection is designed to
 be the cheap half.
 
@@ -624,7 +624,7 @@ view that renders the embedded content, plus the **row height to reserve**.
 The editor reserves that gap in its layout and paints the `AnyView` there as
 an absolute overlay (skipped on the caret's row, where the raw `![[…]]` shows
 for editing). The host owns resolution — fetch the target page, render it
-(typically with [`zorite-markdown`](../zorite-markdown), whose
+(typically with [`zorite-markdown`](https://github.com/packetThrower/zorite-markdown), whose
 `syntax::embed_targets` / `extract_block` / `extract_section` slice `#^id` /
 `#Heading` anchors) — and refreshing views when a source page changes; it
 estimates and caps the height (long content scrolls inside the view).
