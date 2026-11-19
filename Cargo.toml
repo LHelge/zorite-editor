@@ -1,6 +1,6 @@
 [package]
 name = "zorite-editor"
-version = "0.11.5"
+version = "0.11.6"
 edition = "2024"
 description = "A multi-line text editor for GPUI with live Markdown preview, tables, images, and math. The editor behind Zorite's notes."
 license = "MIT"
@@ -11,7 +11,7 @@ categories = ["gui", "text-editors"]
 
 [dependencies]
 # gpui ships on crates.io as the `gpui-pre` family; a caret spec so users aren't pinned to one snapshot.
-gpui = { package = "gpui-pre", version = "0.3" }
+gpui = { package = "gpui-pre", version = "0.3.12" }
 
 # Grapheme-cluster boundaries for cursor movement, so an emoji / combining mark
 # moves as a single unit (matches gpui's own input example).
@@ -33,7 +33,7 @@ gpui-bidi = "0.1"
 [dev-dependencies]
 gpui_platform = { package = "gpui-pre-platform", version = "0.3", features = ["font-kit", "wayland", "x11", "runtime_shaders"] }
 # `#[gpui::test]` + a headless window, for the IME input-handler tests.
-gpui = { package = "gpui-pre", version = "0.3", features = ["test-support"] }
+gpui = { package = "gpui-pre", version = "0.3.12", features = ["test-support"] }
 
 # The demo wires the editor to the real OS spell checker (M6). Dev-only, so the
 # editor crate itself stays host-agnostic and free of any OS-FFI dependency.
