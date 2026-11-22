@@ -123,7 +123,11 @@ home/end; `shift-` + any movement to extend the selection;
 `cmd-c`/`cmd-x`/`cmd-v`; `cmd-z` undo, `cmd-shift-z`/`ctrl-y` redo;
 `tab`/`shift-tab` indent/outdent; `cmd-b`/`cmd-i`/`cmd-u`/`cmd-e`/
 `cmd-shift-x` bold/italic/underline (`<u>`)/inline-code/strikethrough;
-`cmd-shift-h` the `==highlight==`;
+`cmd-shift-h` the `==highlight==`; `cmd-d` duplicates the selection (or,
+with none, the caret's line — a math block, table or code fence whole);
+`cmd-shift-d` duplicates every line the selection touches;
+`alt-shift-up`/`alt-shift-down` move those lines past the neighbouring block
+(both treat blocks as the gutter grip drags them);
 `ctrl-cmd-space` character palette; `escape` dismisses the built-in
 right-click menus.
 

@@ -102,6 +102,10 @@ actions!(
         Highlight,
         Code,
         Dismiss,
+        Duplicate,
+        DuplicateLines,
+        MoveLinesUp,
+        MoveLinesDown,
     ]
 );
 
@@ -171,6 +175,12 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-h", Highlight, ctx),
         KeyBinding::new("ctrl-shift-h", Highlight, ctx),
         KeyBinding::new("escape", Dismiss, ctx),
+        KeyBinding::new("cmd-d", Duplicate, ctx),
+        KeyBinding::new("ctrl-d", Duplicate, ctx),
+        KeyBinding::new("cmd-shift-d", DuplicateLines, ctx),
+        KeyBinding::new("ctrl-shift-d", DuplicateLines, ctx),
+        KeyBinding::new("alt-shift-up", MoveLinesUp, ctx),
+        KeyBinding::new("alt-shift-down", MoveLinesDown, ctx),
         // Windows / Linux: Ctrl + Ins, Shift + Ins,
         KeyBinding::new("ctrl-insert", Copy, ctx),
         KeyBinding::new("shift-delete", Cut, ctx),
@@ -3022,6 +3032,133 @@ impl EditorState {
         }
     }
 
+    /// Duplicate the selection right after itself, keeping the selection on
+    /// the original so pressing again adds another copy; with nothing
+    /// selected, duplicate the caret's line below it, moving the caret onto
+    /// the copy. One undo step either way.
+    fn duplicate(&mut self, _: &Duplicate, _: &mut Window, cx: &mut Context<Self>) {
+        let sel = self.selected_range.clone();
+        let (at, text, new_sel) = if sel.is_empty() {
+            // The caret's line — or, on a math block, table or code fence, the
+            // whole block, so a copy never splits one.
+            let cursor = self.cursor_offset();
+            let (first, last) = self.rendered_block_rows();
+            let starts = self.line_starts();
+            let (start, end) = (starts[first], self.line_end(last));
+            let caret = cursor + (end - start) + 1;
+            (
+                end,
+                format!("\n{}", &self.content[start..end]),
+                caret..caret,
+            )
+        } else {
+            (sel.end, self.content[sel.clone()].to_string(), sel)
+        };
+        let range = at..at;
+        // Its own undo step, never merged into the typing before it.
+        self.last_edit = EditKind::Other;
+        self.record_edit(&range, &text);
+        self.last_edit = EditKind::Other;
+        self.content.insert_str(at, &text);
+        self.remap_diagnostics(&range, text.len());
+        self.selected_range = new_sel;
+        self.marked_range = None;
+        self.goal_x = None;
+        cx.emit(EditorEvent::Changed);
+        cx.notify();
+    }
+
+    /// Duplicate every line the selection touches (whole blocks, as the
+    /// gutter grip drags them), below the originals; the selection moves onto
+    /// the copy.
+    fn duplicate_lines(&mut self, _: &DuplicateLines, _: &mut Window, cx: &mut Context<Self>) {
+        let (first, last) = self.line_block_rows();
+        let starts = self.line_starts();
+        let (start, end) = (starts[first], self.line_end(last));
+        let text = format!("\n{}", &self.content[start..end]);
+        let range = end..end;
+        self.last_edit = EditKind::Other;
+        self.record_edit(&range, &text);
+        self.last_edit = EditKind::Other;
+        self.content.insert_str(end, &text);
+        self.remap_diagnostics(&range, text.len());
+        let shift = text.len();
+        self.selected_range = self.selected_range.start + shift..self.selected_range.end + shift;
+        self.marked_range = None;
+        self.goal_x = None;
+        cx.emit(EditorEvent::Changed);
+        cx.notify();
+    }
+
+    /// Move the lines the selection touches up or down past the neighbouring
+    /// block, keeping the selection on them — the keyboard twin of dragging
+    /// them by the gutter grip.
+    fn move_lines(&mut self, down: bool, cx: &mut Context<Self>) {
+        let (first, last) = self.line_block_rows();
+        let starts = self.line_starts();
+        let target = if down {
+            if last + 1 >= starts.len() {
+                return;
+            }
+            self.drag_block_rows(last + 1).1 + 1
+        } else {
+            if first == 0 {
+                return;
+            }
+            self.drag_block_rows(first - 1).0.min(first - 1)
+        };
+        let (old_start, sel, reversed) = (
+            starts[first],
+            self.selected_range.clone(),
+            self.selection_reversed,
+        );
+        self.apply_line_drag(first, last, target, cx);
+        // `apply_line_drag` seats the caret on the block's new start; put the
+        // selection back where it was within the block.
+        let new_start = self.selected_range.start;
+        let at = |o: usize| (new_start + (o - old_start)).min(self.content.len());
+        self.selected_range = at(sel.start)..at(sel.end);
+        self.selection_reversed = reversed;
+        self.goal_x = None;
+        cx.notify();
+    }
+
+    /// Every line the selection touches (a selection ending at a line's start
+    /// leaves that line out), widened to whole blocks the way the gutter grip
+    /// drags them: a math or code block, a table, a list item with its
+    /// children, a quote run.
+    fn line_block_rows(&self) -> (usize, usize) {
+        let starts = self.line_starts();
+        let row_of = |off: usize| starts.partition_point(|&s| s <= off).saturating_sub(1);
+        let sel = &self.selected_range;
+        let first = row_of(sel.start);
+        let mut last = row_of(sel.end);
+        if !sel.is_empty() && last > first && starts[last] == sel.end {
+            last -= 1;
+        }
+        let a = self.drag_block_rows(first).0.min(first);
+        let b = self.drag_block_rows(last).1.max(last);
+        (a, b)
+    }
+
+    /// The caret's line, or the whole rendered block it sits in (math, table,
+    /// code fence, mermaid, property panel) — not list items or quotes, which
+    /// stay single lines.
+    fn rendered_block_rows(&self) -> (usize, usize) {
+        let starts = self.line_starts();
+        let row = starts
+            .partition_point(|&s| s <= self.cursor_offset())
+            .saturating_sub(1);
+        let line = &self.content[starts[row]..self.line_end(row)];
+        if markdown_syntax::list_prefix(line).is_some()
+            || markdown_syntax::blockquote_prefix(line).is_some()
+        {
+            return (row, row);
+        }
+        let (a, b) = self.drag_block_rows(row);
+        (a.min(row), b.max(row))
+    }
+
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             self.write_clipboard(self.content[self.selected_range.clone()].to_string(), cx);
@@ -5422,6 +5559,10 @@ impl Render for EditorState {
             .on_action(cx.listener(Self::highlight))
             .on_action(cx.listener(Self::code))
             .on_action(cx.listener(Self::indent))
+            .on_action(cx.listener(Self::duplicate))
+            .on_action(cx.listener(Self::duplicate_lines))
+            .on_action(cx.listener(|e, _: &MoveLinesUp, _, cx| e.move_lines(false, cx)))
+            .on_action(cx.listener(|e, _: &MoveLinesDown, _, cx| e.move_lines(true, cx)))
             .on_action(cx.listener(Self::outdent))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::copy))
@@ -7123,6 +7264,85 @@ mod tests {
     /// Undo restored the text but kept spell-check spans shifted for the
     /// undone paste; on a later line one ended inside "가" and DirectWrite
     /// panicked slicing the run. Undo must drop them (the host re-checks).
+    #[gpui::test]
+    fn duplicate_copies_the_selection_or_the_line(cx: &mut gpui::TestAppContext) {
+        let editor = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| EditorState::new(window, cx).with_text("one\ntwo"))
+            })
+            .unwrap()
+        });
+        editor
+            .update(cx, |e, window, cx| {
+                // A selection: copied after itself, still selected.
+                e.selected_range = 0..3;
+                e.duplicate(&super::Duplicate, window, cx);
+                assert_eq!(e.content, "oneone\ntwo");
+                assert_eq!(e.selected_range, 0..3);
+                e.duplicate(&super::Duplicate, window, cx);
+                assert_eq!(e.content, "oneoneone\ntwo");
+                // No selection: the line, with the caret moving onto the copy.
+                e.selected_range = 11..11;
+                e.duplicate(&super::Duplicate, window, cx);
+                assert_eq!(e.content, "oneoneone\ntwo\ntwo");
+                assert_eq!(e.selected_range, 15..15);
+                // One undo step each.
+                e.undo(&super::Undo, window, cx);
+                assert_eq!(e.content, "oneoneone\ntwo");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn whole_line_duplicate_and_move(cx: &mut gpui::TestAppContext) {
+        let editor = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| EditorState::new(window, cx).with_text("a\nbc\nd"))
+            })
+            .unwrap()
+        });
+        editor
+            .update(cx, |e, window, cx| {
+                // Part of "bc" selected: the whole line is copied below, and
+                // the selection follows onto the copy.
+                e.selected_range = 3..4;
+                e.duplicate_lines(&super::DuplicateLines, window, cx);
+                assert_eq!(e.content, "a\nbc\nbc\nd");
+                assert_eq!(e.selected_range, 6..7);
+                // Move that copy up twice: past "bc", then past "a".
+                e.move_lines(false, cx);
+                assert_eq!(e.content, "a\nbc\nbc\nd");
+                e.move_lines(false, cx);
+                assert_eq!(e.content, "bc\na\nbc\nd");
+                assert_eq!(e.selected_range, 1..2);
+                // At the top it stays put; down moves it back.
+                e.move_lines(false, cx);
+                assert_eq!(e.content, "bc\na\nbc\nd");
+                e.move_lines(true, cx);
+                assert_eq!(e.content, "a\nbc\nbc\nd");
+                assert_eq!(e.selected_range, 3..4);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn duplicate_keeps_a_math_block_whole(cx: &mut gpui::TestAppContext) {
+        let editor = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| EditorState::new(window, cx).with_text("x\n$$\na^2\n$$\ny"))
+            })
+            .unwrap()
+        });
+        editor
+            .update(cx, |e, window, cx| {
+                // Caret inside the formula: the whole $$ block is copied.
+                e.selected_range = 6..6;
+                e.duplicate(&super::Duplicate, window, cx);
+                assert_eq!(e.content, "x\n$$\na^2\n$$\n$$\na^2\n$$\ny");
+            })
+            .unwrap();
+    }
+
     #[gpui::test]
     fn undo_drops_stale_diagnostics(cx: &mut gpui::TestAppContext) {
         let editor = cx.update(|cx| {
